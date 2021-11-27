@@ -108,7 +108,7 @@ This ended up performing slightly less precise than boost or randomForest alone.
 t <- ifelse (pred_boost_0_1 == spam_pred_forest_0_1, spam_pred_forest_0_1, ifelse(pred_bagged_0_1 == spam_pred_forest_0_1, spam_pred_forest_0_1, pred_boost_0_1 ))
 ```
 
-Then we want to use the predictions we got from the bagging method as an 'arbritrary' btw boost and randomForest prediction. On the values they disagree, we set the discussed value to the one we had from bagging method.
+Then we want to use the predictions we got from the bagging method as a 'referee' between boost and randomForest prediction. On the values they disagree, we set the discussed value to the one we had from bagging method.
 
 Still not performing better than method we use before. (~94.093%)
 
