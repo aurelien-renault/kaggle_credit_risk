@@ -1,0 +1,170 @@
+---
+title: "Hackaton"
+author: "Renault Aurélien / Rajeriarisoa Alexis"
+date: "18 décembre 2020"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+## Data exploration
+
+```{r}
+library(readr)
+train <- read.csv('data.csv')
+test <- read.csv('test.csv')
+
+summary(train)
+str(train)
+sum(is.na(train)) #check if there is NA
+train <- na.omit(train)
+sum(duplicated(train)) #check for duplicates
+train <- train[!duplicated(train),]
+
+train_scale <- scale(train) #didn't have the time to use
+```
+
+Just quantitatives predictors, don't need to convert any variable into numerical one.
+We see a lot of NA values, we drop them from our train dataset.
+We also check the duplicate lines and drop them of our dataset.
+
+```{r cor}
+library(corrplot)
+cmatrix <- round(cor(train), 2)
+corrplot(cmatrix)
+```
+
+We see on the plot that there is no evident variable that are highly correlated to our response variable, we'll probably have to use all predictors in our models. So, we decided to go straight testing some models incuding all predictors.
+
+## Models
+
+```{r logistic}
+logistic <- glm(SeriousDlqin2yrs~., family = binomial, data=train)
+summary(logistic)
+
+pred.glm = predict(logistic, newdata = test, type="response")
+pred.glm_0_1 = ifelse(pred.glm >= 0.5, 1,0)
+```
+
+Like the previous correlation plot seemed to demonstrate, every predictors is pretty much significative to predict our response variable.
+
+Accuracy of logistic regression : 93.612%
+
+```{r randomForest}
+library(randomForest)
+library(gbm)
+
+forest <- randomForest(SeriousDlqin2yrs~., data = train, mtry = (10^0.5))
+pred_forest = predict(forest, newdata = test)
+pred_forest_0_1 = ifelse(pred_forest >= 0.5, 1,0)
+```
+
+Random Forest method is pretty long to run with those setups, could have test with less number of trees, cutoff parameter also, but still manage to run the code in a reasonnable amount of time.
+
+Accuracy of RandomForest : 94.230%
+
+```{r boost}
+boost <- gbm(SeriousDlqin2yrs~., data = train, distribution = "bernoulli", 
+                  n.trees = 5000, interaction.depth = 4, shrinkage = 0.01)
+pred_boost = predict(boost, newdata = test, type = 'response')
+pred_boost_0_1 = ifelse(pred_boost >= 0.5, 1,0)
+sumary(boost)
+```
+
+Boost method with pretty much the same remarks as the ones we did on randomForest.
+
+Accuracy of Boosting method : 94.230%
+
+```{r bagging}
+bagged <- randomForest(SeriousDlqin2yrs~., data = train, mtry = 9)
+pred_bagged = predict(bagged, newdata = test)
+pred_bagged_0_1 = ifelse(pred_bagged >= 0.5, 1,0)
+```
+
+Run in a very long amount of time, could have enhance time perf using same suggestions we did for randomForest. 
+
+Accuracy of bagging method : 93.956%
+
+```{r QDA}
+library(MASS)
+classifier.qda <- qda(SeriousDlqin2yrs~., data = train)
+pred.qda = predict(classifier.qda, newdata = test, type = 'response')
+
+```
+
+Accuracy of qda : 93.612%
+
+```{r }
+y <- ifelse (pred_boost_0_1 != pred_forest_0_1, 0, pred_boost_0_1)
+```
+
+We now try to combine all our models to potentially get a better preformance.
+
+First we try to combine the two best performing models : boost and randomForest. If the two models disagree on one value we decide to set this value to zero based on the simple assumption that there are much more zeros than ones. A full zeros predictors is actually as accurate as the logistic regression (93.612%).
+
+This ended up performing slightly less precise than boost or randomForest alone. (~94.162%)
+
+```{r}
+t <- ifelse (pred_boost_0_1 == spam_pred_forest_0_1, spam_pred_forest_0_1, ifelse(pred_bagged_0_1 == spam_pred_forest_0_1, spam_pred_forest_0_1, pred_boost_0_1 ))
+```
+
+Then we want to use the predictions we got from the bagging method as an 'arbritrary' btw boost and randomForest prediction. On the values they disagree, we set the discussed value to the one we had from bagging method.
+
+Still not performing better than method we use before. (~94.093%)
+
+```{r}
+somme_4 <- pred.glm_0_1 + pred_bagged_0_1 + pred_boost_0_1 + spam_pred_forest_0_1
+somme_4 <- somme/4
+n <-ifelse(somme < 0.5 , 0,1)
+```
+
+```{r}
+somme_5 <- pred.glm_0_1 + pred_bagged_0_1 + pred_boost_0_1 + spam_pred_forest_0_1 + as.numeric(unlist(pred.qda[1]))
+somme_5 <- somme/5
+v <-ifelse(somme <= 0.5 , 0,1)
+```
+
+We now decided to use all our models to make the average btw all of them. 
+We first did this not involving the qda method which we implemented after, since, with an even number of used models, the following question come up : what do we do if the average is 0.5 exactly ?
+
+So we add the qda classifier method, to make our number of used models odd and get rid of the previous problematic.
+
+Performance still doesn't go up. (94.024% for 4 models, 93.612% including QDA)
+
+```{r}
+somme_weighted <- pred.glm_0_1 + pred_bagged_0_1 + 2*pred_boost_0_1 + 2*spam_pred_forest_0_1 + as.numeric(unlist(pred.qda[1]))
+somme_weighted <- somme_weighted/7
+w <-ifelse(somme <= 0.5 , 0,1)
+```
+
+Last try : we now affect slightly higher weights to the models that performs best alone, that is to say boost and randomForest.
+
+Still can't manage to improve our best score. (93.612%)
+
+
+we are now running out of time, we wished we tried to scale the data or maybe interest ourself data distibution in each variable (extreme / incoherent sample)
+
+## Prediction
+
+```{r}
+to_be_submitted = data.frame(id=rownames(test), SeriousDlqin2yrs='pred.glm_0_1')
+write.csv(to_be_submitted , file = "to_be_submitted.csv", row.names = F)
+```
+
+We just change the predictor vector name each time we need to check on model or another
+
+
+## Last minutes
+
+```{r}
+pred_forest_0_1[962] = 0
+pred_forest_0_1[1421] = 0
+pred_forest_0_1[1439] = 0
+pred_forest_0_1[1347] = 0
+```
+
+In the end we had 4 submissions left, and just a few minutes left.
+To use these 4 submisions quickly we check the probability qda provided us that one sample was equal to 0 and on which our best model so far (randomForest) predicted a 1. We then modify the 1 into a 0 when qda probability was relativily big comparing to the probability since it was quite easy to check. 
+
+We had some luck and this worked pretty well, our best score got sligthly improve to reach 94.505% and win the competition ;)
+
